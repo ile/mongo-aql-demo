@@ -2,7 +2,7 @@ var mongoaql = require('mongo-aql'),
 	pane2 = document.getElementById('pane2'),
 	collection = document.getElementById('collection'),
 	editor = CodeMirror(document.getElementById('pane1'), {
-		value: '{\n\t"foo": 123,\n\t"bar": "hello",\n\t"$limit": 3,\n\t"$orderby": { "bar": -1},\n\t"@city": "cities/123456789"\n}',
+		value: '{\n\t"foo": 123,\n\t"bar": "hello",\n\t"$limit": 3,\n\t"$orderby": { "bar": 1 },\n\t"@city": "cities/123456789"\n}',
 		mode:  "javascript"
 	});
 
