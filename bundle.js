@@ -46,17 +46,20 @@
 
 	var mongoaql = __webpack_require__(1),
 		pane2 = document.getElementById('pane2'),
+		collection = document.getElementById('collection'),
 		editor = CodeMirror(document.getElementById('pane1'), {
-			value: '{\n\t"foo": 123,\n\t"bar": 456\n}',
+			value: '{\n\t"foo": 123,\n\t"bar": "hello",\n\t"@city": "cities/123456789"\n}',
 			mode:  "javascript"
 		});
 
-	function update(instance) {
-		pane2.innerHTML = mongoaql('collection', instance.getValue());
+	function update() {
+		var aql = mongoaql(collection.value, editor.getValue())
+		pane2.value = aql.aql + '\n' + JSON.stringify(aql.vars) + '\n\n\ndb._query(\'' + aql.aql.replace(/[\n\t]/g, '') + '\', ' + JSON.stringify(aql.vars) + ')';
 	}
 
 	update(editor);
 	editor.on('change', update);
+	collection.addEventListener('input', update);
 
 /***/ },
 /* 1 */
@@ -70,7 +73,9 @@
 	function parse(collection, json) {
 		var aql = 'FOR u IN ' + collection + ' ',
 			filter = [],
-			k, v, o, firstLetter;
+			link = [],
+			values = {},
+			k, v, cname, firstLetter, varname;
 
 		if (typeof json === 'string') {
 			try {
@@ -93,11 +98,14 @@
 
 			}
 			else if (firstLetter == '@') {
+				try {
+					link.push({ key: k.substring(1), value: v, collection: v.match(/^([^/]+)\//)[1] });
+				}
+				catch (err) {
 
+				}
 			}
 			else {
-				o = {};
-				o[k] = v;
 				filter.push({ key: k, value: v });
 			}
 		}
@@ -110,13 +118,33 @@
 					aql += ' && ';
 				}
 
-				aql += filter[i].key + ' == ' + filter[i].value;
+				varname = 'var_' + Object.keys(values).length;
+				aql += 'u.' + filter[i].key + ' == @' + varname + ' ';
+				values[varname] = filter[i].value;
 			}
 		}
 
-		aql += ' \nRETURN u';
+		if (link.length) {
 
-		return aql;
+			for (var i = 0; i < link.length; i++) {
+				cname = 'c' + i;
+				aql += '\n\t\tFOR ' + cname + ' IN ' + link[i].collection + ' ';
+				aql += '\n\t\t\tFILTER u.' + link[i].key + ' == ' + cname + '._id ';
+			}
+
+			aql += 'RETURN merge(u';
+
+			for (var i = 0; i < link.length; i++) {
+				aql += ', { ' + link[i].key + ': ' + cname + ' }';
+			}
+
+			aql += ')';
+		}
+		else {
+			aql += ' \nRETURN u';
+		}
+
+		return { aql: aql, vars: values };
 	}
 
 /***/ }
