@@ -54,7 +54,10 @@
 
 	function update() {
 		var aql = mongoaql(collection.value, editor.getValue())
-		pane2.value = aql.aql + '\n' + JSON.stringify(aql.vars) + '\n\n\ndb._query(\'' + aql.aql.replace(/[\n\t]/g, '') + '\', ' + JSON.stringify(aql.vars) + ')';
+
+		if (aql) {
+			pane2.value = aql.aql + '\n' + JSON.stringify(aql.vars) + '\n\n\ndb._query(\'' + aql.aql.replace(/[\n\t]/g, '') + '\', ' + JSON.stringify(aql.vars) + ')';
+		}
 	}
 
 	update(editor);
