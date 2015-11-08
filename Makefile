@@ -5,6 +5,7 @@ run:
 	python -m SimpleHTTPServer 8000
 
 push:
+	webpack ./app.js bundle.js
 	git add -A .; git commit -am "..."; git push
 	webpack ./app.js bundle.js
 	git checkout gh-pages
