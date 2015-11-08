@@ -1,0 +1,21 @@
+{
+  "name": "mongo-aql-demo",
+  "description": "",
+  "main": "index.js",
+  "authors": [
+    "Ilkka Huotari <ilkkah@gmail.com>"
+  ],
+  "license": "ISC",
+  "homepage": "https://github.com/ile/mongo-aql-demo",
+  "moduleType": [],
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "codemirror": "~5.8.0"
+  }
+}
