@@ -74,6 +74,8 @@
 		var aql = 'FOR u IN ' + collection + ' ',
 			filter = [],
 			link = [],
+			limit = 0,
+			sort = null,
 			values = {},
 			k, v, cname, firstLetter, varname;
 
@@ -95,7 +97,14 @@
 			firstLetter = k.substring(0, 1);
 
 			if (firstLetter == '$') {
-
+				if (k === '$limit') {
+					limit = v;
+				}
+				else if (k === '$orderby') {
+					for (k2 in v) {
+						sort = { key: k2, how: v[k2] === 1? 'ASC': 'DESC' };
+					}
+				}
 			}
 			else if (firstLetter == '@') {
 				try {
@@ -115,13 +124,21 @@
 
 			for (var i = 0; i < filter.length; i++) {
 				if (i > 0) {
-					aql += ' && ';
+					aql += '&& ';
 				}
 
-				varname = 'var_' + Object.keys(values).length;
+				varname = 'v' + Object.keys(values).length;
 				aql += 'u.' + filter[i].key + ' == @' + varname + ' ';
 				values[varname] = filter[i].value;
 			}
+		}
+
+		if (limit) {
+			aql += '\n\tLIMIT ' + limit + ' ';
+		}
+
+		if (sort) {
+			aql += '\n\tSORT u.' + sort.key + ' ' + sort.how + ' ';
 		}
 
 		if (link.length) {
