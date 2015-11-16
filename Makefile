@@ -1,8 +1,9 @@
+run:
+	webpack ./app.js bundle.js
+	python -m SimpleHTTPServer 8000
+
 compile:
 	webpack ./app.js bundle.js
-
-run:
-	python -m SimpleHTTPServer 8000
 
 push:
 	webpack ./app.js bundle.js

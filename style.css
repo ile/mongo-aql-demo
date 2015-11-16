@@ -4,25 +4,53 @@
     left: 0;
     right: 0;
     position: absolute;
+    display: flex;
+    flex-flow: row;    
 }
 
-#pane1 {
-    box-shadow: inset 0 0 0 black, inset -1px 0 15px rgba(0, 0, 0, 0.1), inset -2px 0 1px rgba(0, 0, 0, 0.05);
-    width: 33%;
+#errors {
+    height: 80px
+    text-align: left;
+    color: #d00;
+    height: 80px;
+    line-height: 80px;
+    font-size: 16px;
+    padding: 0 20px;
+    box-sizing: border-box;
+    font-family: monospace;
 }
 
 #pane1, .CodeMirror {
     background: #fcfcfb;
+    font-size: 17px;
+}
 
+textarea {
+    padding: 20px;
+    font-size: 17px;
+    flex: 1;
+    border: none;
+}
+
+#pane1 {
+    box-shadow: inset 0 0 0 black, inset -1px 0 15px rgba(0, 0, 0, 0.1), inset -2px 0 1px rgba(0, 0, 0, 0.05);
+    flex: 33%;
+    padding: 20px;
+}
+
+#pane2 {
+    flex: 67%;
+    flex-direction: column;
+    display: flex;
+}
+
+.inner-pane {
+    width: 100%
 }
 
 .pane {
-    width: 67%;
     height: 100%;
     position: relative;
-    float: left;
-    padding: 20px;
-    font-size: 17px;
     box-sizing: border-box;
     margin: 0;
     transition: all 100ms linear;
@@ -50,7 +78,7 @@
 }
 
 .footer {
-    font-family: Arial;
+    font-family: monospace;
     font-size: 14px;
     background: #eee;
     position: absolute;
