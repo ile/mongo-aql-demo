@@ -50,9 +50,10 @@
 		collection = document.getElementById('collection'),
 		q = {
 			foo: { bar: 'baz', bar2: 'baz2' },
-			"$limit": 10,
-			"$skip": 100,
-			"$orderby": { name: 1, name2: 1 },
+		    testing: { $in: [1,2,3] },
+			$limit: 10,
+			$skip: 100,
+			$orderby: { name: 1, name2: 1 },
 			"@city": "cities"
 		},
 		editor = CodeMirror(document.getElementById('pane1'), {
