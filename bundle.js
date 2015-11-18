@@ -53,7 +53,7 @@
 		    testing: { $in: [1,2,3] },
 			$limit: 10,
 			$skip: 100,
-			$orderby: { name: 1, name2: 1 },
+			$orderby: { name: 1 },
 			"@city": "cities"
 		},
 		editor = CodeMirror(document.getElementById('pane1'), {
