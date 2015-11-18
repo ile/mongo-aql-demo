@@ -2015,7 +2015,7 @@
 	  , variables = type.match(/\{\w+\}/g);
 
 	  values    = values || {};
-	  query.__defaultTable = Array.isArray(query.table) ? query.table[0] : query.table;
+	  query.__defaultTable = query.table;
 	  query.columns = ['*'];
 
 	  for (var i = 0, l = variables.length, key; i < l; ++i){
@@ -2032,11 +2032,7 @@
 	  var result = {
 	    query :   type.trim().replace(/\s+/g, " ")
 	  , values:   values
-	  , original: query
 	  };
-
-	  result.toString = function(){ return result.query; };
-	  result.toQuery = function() { return { text: result.query, values: result.values }; };
 
 	  return result;
 	};
@@ -2136,10 +2132,20 @@
 	utils.newVar = function(value, values, prefix) {
 	  prefix = prefix || '';
 
-	  var varname = prefix + 'v' + Object.keys(values).length;
-	  values[varname] = value;
+	  if (Array.isArray(value)) {
+	    res = [];
+	    for (var i = 0; i < value.length; i++) {
+	      res.push(utils.newVar(value[i], values, prefix));
+	    }
 
-	  return '@' + varname;
+	    return res.join('.');
+	  }
+	  else {
+	    var varname = prefix + 'v' + Object.keys(values).length;
+	    values[varname] = value;
+
+	    return '@' + varname;
+	  }
 	}
 
 	utils.parameterize = function(value, values){
@@ -2368,7 +2374,7 @@
 	  var output = "SORT ";
 
 	  for (var key in order) {
-	    output += utils.quoteObject(key, query.__defaultTable) + ' ' + (order[key] === 1? 'ASC': 'DESC') + ', ';
+	    output += query.__defaultTable + '.' + utils.newVar(key, values) + ' ' + (order[key] === 1? 'ASC': 'DESC') + ', ';
 	  }
 
 	  if (output === "SORT ") return "";
@@ -2410,6 +2416,7 @@
 		if (embed && embed.length) {
 			for (var i = 0; i < embed.length; i++) {
 				embed[i].cname = 'c' + i;
+				embed[i].key = utils.newVar(embed[i].key, values);
 				res += 'LET ' + embed[i].cname + ' = DOCUMENT(' + utils.newVar(embed[i].collection, values, '@') + ', ' + query.__defaultTable + '.' + embed[i].key +') ';
 			}	
 		}
@@ -2532,9 +2539,11 @@
 	var utils = __webpack_require__(11);
 
 	helpers.register('table', function(table, values, query){
-	  if (typeof table != 'string' ) throw new Error('Invalid table type: ' + typeof table);
+		var re = /^[a-z0-9_-]+$/i;
+		if (typeof table != 'string') throw new Error('Invalid table type: ' + typeof table);
+		if (!re.test(table)) throw new Error('Invalid table name: ' + table);
 
-	  return (query.type === 'select' ? 'IN ' : '') + table;
+		return (query.type === 'select' ? 'IN ' : '') + table;
 	});
 
 
@@ -2563,15 +2572,20 @@
 	;
 
 	module.exports = function(where, table, values){
-	  var buildConditions = function(where, condition, column, joiner){
+
+	  var buildConditions = function(where, condition, column, joiner, fields){
+	    console.log(arguments);
 	    joiner = joiner || ' && ';
-	    if (column) {
-	      column = utils.quoteObject(column, table);
-	    }
+	    fields = fields || [];
+
+	    // if (column) {
+	    //   column = utils.quoteObject(column, table);
+	    // }
 
 	    var conditions = [], result;
 
 	    for (var key in where) {
+	      console.log(key, '---', where[key])
 
 	      // If the value is null, send a $null helper through the condition builder
 	      if ( where[key] === null ) {
@@ -2589,30 +2603,38 @@
 	          // as the current condition
 	          // If it doesn't cascade, run the helper immediately
 	          if (helpers.get(key).options.cascade)
-	            (result = buildConditions(where[key], key, column)) && conditions.push(result);
+	            (result = buildConditions(where[key], key, column, joiner, fields)) && conditions.push(result);
 	          else
 	            (result = helpers.get(key).fn(column, where[key], values, table, where[key])) && conditions.push(result);
 	        }
 
 	        // Key is Joiner
 	        else if (key == '$or')
-	          (result = buildConditions(where[key], condition, column, ' || ')) && conditions.push(result);
+	          (result = buildConditions(where[key], condition, column, ' || ', fields)) && conditions.push(result);
 	        else if (key == '$and')
-	          (result = buildConditions(where[key], condition, column)) && conditions.push(result);
+	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
 
 	        // Key is array index
 	        else if (+key >= 0)
-	          (result = buildConditions(where[key], condition, column)) && conditions.push(result);
+	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
 
 	        // Key is column
-	        else
-	          (result = buildConditions(where[key], condition, key)) && conditions.push(result);
+	        else {
+	          (result = buildConditions(where[key], condition, key, joiner, fields.concat(key))) && conditions.push(result);
+	        }
 
 	        continue;
 	      }
 
 	      // Key is a helper, use that for this value
-	      if (helpers.has(key))
+	      if (helpers.has(key)) {
+	        console.log()
+	        console.log('* Key is a helper', key)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
 	        conditions.push(
 	          helpers.get(key).fn(
 	            column
@@ -2623,8 +2645,21 @@
 	          )
 	        );
 
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
+
 	      // Key is an array index
-	      else if (+key >= 0)
+	      else if (+key >= 0) {
+	        console.log()
+	        console.log('* Key is an array index', key)
+	        console.log('fields', fields)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
 	        conditions.push(
 	          helpers.get(condition).fn(
 	            column
@@ -2635,17 +2670,35 @@
 	          )
 	        );
 
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
+
 	      // Key is a column
-	      else
+	      else {
+	        console.log()
+	        console.log('* Key is a column', key)
+	        console.log('fields', fields)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
 	        conditions.push(
 	          helpers.get(condition).fn(
-	            (column || table) + '.' + key
+	            table + (fields.length? '.' + utils.newVar(fields, values): '') + '.' + utils.parameterize(key, values)
 	          , utils.parameterize(where[key], values)
 	          , values
 	          , table
 	          , where[key]
 	          )
 	        );
+
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
 	    }
 
 	    if (conditions.length > 1) return '(' + conditions.join(joiner) + ')';
@@ -2683,7 +2736,7 @@
 		res = 'RETURN '
 
 		if (embed && embed.length) {
-			res += 'merge(u';
+			res += 'MERGE(' + query.__defaultTable;
 
 			for (var i = 0; i < embed.length; i++) {
 				res += ', { ' + embed[i].key + ': ' + embed[i].cname + ' }';
@@ -2814,12 +2867,15 @@
 	 */
 	conditionals.add('$in', { cascade: false }, function(column, set, values, collection, original){
 	  if (Array.isArray(set)) {
-	    return column + ' in [' + set.map( function(val){
+	    return utils.newVar(column, values) + ' in [' + set.map( function(val){
 	      return utils.newVar(val, values)
 	    }).join(', ') + ']';
 	  }
+	  else {
+	    return '';
+	  }
 
-	  return column + ' in [' + queryBuilder(set, values).toString() + ']';
+	  // return utils.newVar(column, values) + ' in [' + queryBuilder(set, values).toString() + ']';
 	});
 
 	/**
@@ -2836,60 +2892,17 @@
 	 */
 	conditionals.add('$nin', { cascade: false }, function(column, set, values, collection, original){
 	  if (Array.isArray(set)) {
-	    return column + ' not in (' + set.map( function(val){
+	    return utils.newVar(column, values) + ' not in (' + set.map( function(val){
 	      return utils.newVar(val, values)
 	    }).join(', ') + ')';
 	  }
+	  else {
+	    return '';
+	  }
 
-	  return column + ' not in (' + queryBuilder(set, values).toString() + ')';
+	  // return column + ' not in (' + queryBuilder(set, values).toString() + ')';
 	});
 
-	conditionals.add('$custom', { cascade: false }, function(column, value, values, collection, original){
-	  if (Array.isArray(value))
-	    return conditionals.get('$custom_array').fn( column, value, values, collection );
-
-	  if (typeof value == 'object')
-	    return conditionals.get('$custom_object').fn( column, value, values, collection );
-
-	  throw new Error('Invalid Custom Value Input');
-	});
-
-	conditionals.add('$custom_array', { cascade: false }, function(column, value, values, collection, original){
-	  var output = value[0];
-
-	  return output.replace(
-	    /\$\d+/g, function(match) {
-	    return utils.newVar(value[match.slice(1)], values)
-	  });
-	});
-
-	conditionals.add('$custom_object', { cascade: false }, function(column, value, values, collection, original){
-	  return conditionals.get('$custom_array').fn(column, [value.value].concat(value.values), values, collection);
-	});
-
-	conditionals.add('$years_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " year";
-	});
-
-	conditionals.add('$months_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " month";
-	});
-
-	conditionals.add('$days_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " day";
-	});
-
-	conditionals.add('$hours_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " hour";
-	});
-
-	conditionals.add('$minutes_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " minute";
-	});
-
-	conditionals.add('$seconds_ago', function(column, value, values, collection, original){
-	  return column + " >= now() - interval " + value + " second";
-	});
 
 
 /***/ }
