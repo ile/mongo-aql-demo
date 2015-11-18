@@ -2,8 +2,15 @@ var mongoaql = require('mongo-aql'),
 	result = document.getElementById('result'),
 	errors = document.getElementById('errors'),
 	collection = document.getElementById('collection'),
+	q = {
+		foo: { bar: 'baz', bar2: 'baz2' },
+		"$limit": 10,
+		"$skip": 100,
+		"$orderby": { name: 1, name2: 1 },
+		"@city": "cities"
+	},
 	editor = CodeMirror(document.getElementById('pane1'), {
-		value: '{\n\t"hi": "there",\n\t"foo": { "bar": "baz", "yo": "man" },\n\t"$limit": 10,\n\t"$skip": 100,\n\t"$orderby": { "hi": 1 },\n\t"@city": "cities"\n}',
+		value: JSON.stringify(q, null, '\t'),
 		mode:  "javascript"
 	});
 
