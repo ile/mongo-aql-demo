@@ -18,7 +18,6 @@ function update() {
 	try {
 		var aql = mongoaql(collection.value, editor.getValue())
 		errors.innerHTML = '';
-		console.log(aql);
 
 		if (aql) {
 			result.value = aql.query + '\n' + JSON.stringify(aql.values) + '\n\n\ndb._query(\'' + aql.query.replace(/[\n\t]/g, '') + '\', ' + JSON.stringify(aql.values) + ')';
