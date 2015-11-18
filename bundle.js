@@ -77,27 +77,27 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	
-	__webpack_require__(2);
+	__webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module \"./lib/normalize\""); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
 
-	var	build               = __webpack_require__(7);
+	var	build               = __webpack_require__(2);
 
 	// Register query types
-	__webpack_require__(12);
+	__webpack_require__(7);
 
 	// Register query helpers
+	__webpack_require__(8);
+	__webpack_require__(9);
+	__webpack_require__(10);
+	__webpack_require__(11);
+	__webpack_require__(12);
 	__webpack_require__(13);
-	__webpack_require__(14);
 	__webpack_require__(15);
 	__webpack_require__(16);
 	__webpack_require__(17);
-	__webpack_require__(18);
-	__webpack_require__(20);
-	__webpack_require__(21);
-	__webpack_require__(22);
-	__webpack_require__(25);
+	__webpack_require__(24);
 
 	// Register conditional helpers
-	__webpack_require__(26);
+	__webpack_require__(25);
 
 	module.exports = build;
 
@@ -106,20 +106,790 @@
 /* 2 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {
-	// When condition builder is checking sub-objects, one of the
-	// steps is to make sure we're not traversing a buffer
-	if ( typeof Buffer === 'undefined' ){
-	  window.Buffer = function(){};
-	  window.Buffer.isBuffer = function(){
-	    return false;
+	
+	var queryTypes = __webpack_require__(3);
+	var queryHelpers = __webpack_require__(4);
+	var utils = __webpack_require__(6);
+
+	module.exports = function(collection, json) {
+	  if (typeof collection !== 'string' || !collection || !collection.length) {
+	    throw new Error('collection empty or not a string.')
+	  }  
+
+	  if (typeof json === undefined || !json) {
+	    throw new Error('json empty.')
+	  }  
+
+	  var query = {
+	    type: 'select',
+	    table: collection,
+	    alias: 'c',
+	    return: true
 	  };
+
+	  if (typeof json === 'string') {
+	    try {
+	      json = JSON.parse(json);
+	    }
+	    catch (err) {
+	      throw new Error(err);
+	      return err;
+	    }
+	  }
+
+	  if (!json) {
+	    return '';
+	  }
+
+	  for (var key in json) {
+	    if (key === '$orderby') {
+	      query['order'] = json[key];
+	      delete json[key];
+	    }
+	    else if (key === '$limit') {
+	      if (json['$skip']) {
+	        query['limit'] = [ json['$skip'], json[key] ];
+	        delete json['$skip'];
+	      }
+	      else {
+	        query['limit'] = json[key];
+	      }
+
+	      delete json[key];
+	    }
+	    else if (key.substring(0, 1) === '@') {
+	      query.embed = query.embed || [];
+	      query.embed.push({ key: key.substring(1), collection: json[key] });
+	      delete json[key];
+	    }
+	  }
+
+	  // the rest belongs to "where"
+	  query.where = json;
+
+	  return build(query);
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(3).Buffer))
+	/**
+	 * Main AQL Building function
+	 * @param  {Object} query
+	 * @param  {Array}  values
+	 * @return {String}
+	 */
+	function build(query, values) {
+	  if (!query.type){
+	    query.type = 'expression';
+	  } else if (!queryTypes.has(query.type)){
+	    query.function = query.type;
+	    query.type = 'function';
+	  }
+
+	  var
+	    type      = queryTypes.get(query.type)
+	  , variables = type.match(/\{\w+\}/g);
+
+	  values    = values || {};
+	  query.__defaultTable = query.table;
+	  query.columns = ['*'];
+
+	  for (var i = 0, l = variables.length, key; i < l; ++i){
+	    // If there exists a builder function and input in the options
+	    // corresponding to the query helper name, then run that
+	    // helper function with the value of the query->helper_key
+	    type = type.replace(
+	      variables[i]
+	    , queryHelpers.has(key = variables[i].substring(1, variables[i].length - 1)) && query[key] ?
+	      queryHelpers.get(key).fn(query[key], values, query) : ''
+	    );
+	  }
+
+	  var result = {
+	    query :   type.trim().replace(/\s+/g, " ")
+	  , values:   values
+	  };
+
+	  return result;
+	};
+
 
 /***/ },
 /* 3 */
+/***/ function(module, exports) {
+
+	
+	var types = {};
+
+	module.exports.add = function(type, query){
+	  types[type] = query;
+	};
+
+	module.exports.get = function(type){
+	  return types[type];
+	};
+
+	module.exports.has = function(type){
+	  return types.hasOwnProperty(type);
+	};
+
+	Object.defineProperty(module.exports, 'list', {
+	  get: function() {
+	    return Object.keys(types);
+	  }
+	});
+
+
+/***/ },
+/* 4 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var HelperManager = __webpack_require__(5);
+
+	module.exports = new HelperManager();
+
+
+/***/ },
+/* 5 */
+/***/ function(module, exports) {
+
+	
+	var HelperManager = function(defaults){
+	  this.defaults = defaults || {};
+	  this.helpers = {};
+	  return this;
+	};
+
+	HelperManager.prototype.get = function(name){
+	  if (!this.has(name)) throw new Error('Cannot find helper: ' + name);
+	  return this.helpers[name];
+	};
+
+	HelperManager.prototype.has = function(name){
+	  return this.helpers.hasOwnProperty(name);
+	};
+
+	HelperManager.prototype.add = function(name, options, fn){
+	  if (typeof options == 'function'){
+	    fn = options;
+	    options = {};
+	  }
+
+	  options = options || {};
+
+	  for (var key in this.defaults){
+	    if (!(key in options)) options[key] = this.defaults[key];
+	  }
+
+	  this.helpers[name] = { fn: fn, options: options };
+
+	  return this;
+	};
+
+	HelperManager.prototype.register = function(name, options, fn){
+	  return this.add(name, options, fn);
+	};
+
+	module.exports = HelperManager;
+
+
+/***/ },
+/* 6 */
+/***/ function(module, exports) {
+
+	
+	var utils = module.exports = {};
+	var regs = {
+	  dereferenceOperators: /[-#=]+>+/g
+	, endsInCast: /::\w+$/
+	};
+
+	utils.newVar = function(value, values, prefix) {
+	  prefix = prefix || '';
+
+	  if (Array.isArray(value)) {
+	    res = [];
+	    for (var i = 0; i < value.length; i++) {
+	      res.push(utils.newVar(value[i], values, prefix));
+	    }
+
+	    return res.join('.');
+	  }
+	  else {
+	    var varname = prefix + 'v' + Object.keys(values).length;
+	    values[varname] = value;
+
+	    return '@' + varname;
+	  }
+	}
+
+	utils.parameterize = function(value, values){
+	  if (typeof value == 'boolean') return value ? 'true' : 'false';
+	  if (value[0] != '@') return utils.newVar(value, values);
+	  if (value[value.length - 1] != '@') return values.push(value);
+	  return utils.quoteObject(value.substring(1, value.length - 1));
+	};
+
+	utils.quoteColumn = utils.quoteObject = function(field, collection){
+	  var period;
+	  var rest = Array.prototype.slice.call( arguments, 1 );
+	  var split;
+
+	  // Wierdly on phantomjs Number.isNaN is undefined
+	  // FIXME: find the root cause
+	  var checkIsNaN = Number.isNaN || isNaN;
+
+	  // Split up database and/or schema definition
+	  for(var i=0;i<rest.length;++i) {
+	    if(rest[i].indexOf('.')) {
+	      split = rest[i].split('.');
+	      rest.splice(i,1);
+	      split.forEach(function(s) {
+	        rest.splice(i,0,s);
+	      });
+	    }
+	  }
+
+	  // They're casting
+	  if ( regs.endsInCast.test( field ) ){
+	    return utils.quoteObject.apply(
+	      null
+	    , [ field.replace( regs.endsInCast, '' ) ].concat( rest )
+	    ) + field.match( regs.endsInCast )[0];
+	  }
+
+	  // They're using JSON/Hstore operators
+	  if ( regs.dereferenceOperators.test( field ) ){
+	    var operators = field.match( regs.dereferenceOperators );
+
+	    // Split on operators
+	    return field.split(
+	      regs.dereferenceOperators
+	    // Properly quote each part
+	    ).map( function( part, i ){
+	      if ( i === 0 ) return utils.quoteObject.apply( null, [ part ].concat( rest ) );
+
+	      if ( checkIsNaN( parseInt( part ) ) && part.indexOf("'") === -1 ){
+	        return "'" + part + "'";
+	      }
+
+	      return part;
+	    // Re-join fields and operators
+	    }).reduce( function( a, b, i ){
+	      return [ a, b ].join( operators[ i - 1 ] );
+	    });
+	  }
+
+	  // Just using *, no collection
+	  if (field.indexOf('*') === 0 && collection)
+	    return '"' + (rest.reverse()).join('"."') + '".*';
+
+	  // Using *, specified collection, used quotes
+	  else if (field.indexOf('".*') > -1)
+	    return field;
+
+	  // Using *, specified collection, didn't use quotes
+	  else if (field.indexOf('.*') > -1)
+	    return '"' + field.split('.')[0] + '".*';
+
+	  // No periods specified in field, use explicit `table[, schema[, database] ]`
+	  else if (field.indexOf('.') === -1)
+	    return ( rest.reverse() ).concat( field.replace( /\"/g, '' ) ).join('.');
+
+	  // Otherwise, a `.` was in there, just quote whatever was specified
+	  else
+	    return field.replace( /\"/g, '' ).split('.').join('.');
+	};
+
+	utils.quoteValue = function(value){
+	  var num = parseInt(value), isNum = (typeof num == 'number' && (num < 0 || num > 0));
+	  return isNum ? value : "$$" + value + "$$";
+	};
+
+	/**
+	 * Returns a function that when called, will call the
+	 * passed in function with a specific set of arguments
+	 */
+	utils.with = function(fn){
+	  var args = Array.prototype.slice.call(arguments, 1);
+	  return function(){ fn.apply({}, args); };
+	};
+
+
+/***/ },
+/* 7 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var queryTypes = __webpack_require__(3);
+
+	queryTypes.add( 'select', [
+	  'FOR'
+	, '{alias} {table}'
+	, '{where} {limit} {order} {embed} {return}'
+	].join(' '));
+
+	/*
+	queryTypes.add(
+	  'insert'
+	, '{with} insert into {table} {columns} {values} {expression} {returning}'
+	);
+
+	queryTypes.add(
+	  'update'
+	, '{with} update {table} {values} {updates} {from} {where} {returning}'
+	);
+
+	queryTypes.add(
+	  'delete'
+	, '{with} delete from {table} {where} {returning}'
+	);
+
+	queryTypes.add(
+	  'remove'
+	, '{with} delete from {table} {alias} {where} {returning}'
+	);
+
+	queryTypes.add(
+	  'create-table'
+	, '{with} create table {ifNotExists} {table} ({definition})'
+	);
+
+	queryTypes.add(
+	  'drop-table'
+	, '{with} drop table {ifExists} {table} {cascade}'
+	);
+
+	queryTypes.add(
+	  'alter-table'
+	, 'alter table {ifExists} {only} {table} {action}'
+	);
+
+	queryTypes.add(
+	  'create-view'
+	, 'create {orReplace} {temporary} view {view} {columns} as {expression}'
+	);
+
+	queryTypes.add(
+	  'union'
+	, '{with} {queries}'
+	);
+
+	queryTypes.add(
+	  'intersect'
+	, '{with} {queries}'
+	);
+
+	queryTypes.add(
+	  'except'
+	, '{with} {queries}'
+	);
+	*/
+	queryTypes.add('function', '{function}( {expression} )');
+	queryTypes.add('expression', '{expression}');
+
+
+/***/ },
+/* 8 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var helpers = __webpack_require__(4);
+	var queryBuilder = __webpack_require__(2);
+
+	helpers.register('values', function(values, valuesArray, query){
+	  if (typeof values != 'object') throw new Error('Invalid values input in query properties');
+
+	  if (query.type === 'update')
+	    return helpers.get('updates').fn(values, valuesArray, query);
+
+	  if ( !Array.isArray( values ) ) values = [ values ];
+
+	  if ( values.length === 0 ) throw new Error('MoSQL.queryHelper.values - Invalid values array length `0`');
+
+	  // Build object keys union
+	  var keys = [], checkKeys = function( k ){
+	    if ( keys.indexOf( k ) > -1 ) return;
+	    keys.push( k );
+	  };
+
+	  for ( var i = 0, l = values.length; i < l; ++i ) {
+	    Object.keys( values[i] ).forEach( checkKeys );
+	  }
+
+	  var allValues = values.map( function( value ) {
+	    var result = [];
+	    for ( var i = 0, l = keys.length; i < l; ++i ){
+	      if (value[ keys[i] ] === null || value[ keys[i] ] === undefined) {
+	        result.push('null');
+	      } else if (typeof value[ keys[i] ] == 'object' && 'type' in value[ keys[i] ]) {
+	        result.push('(' + queryBuilder( value[ keys[i] ], valuesArray ) + ')');
+	      } else {
+	        result.push('@' + valuesArray.push(value[keys[i]]));
+	      }
+	    }
+	    return '(' + result.join(', ') + ')';
+	  }).join(', ');
+
+	  return '("' + keys.join('", "') + '") values ' + allValues;
+	});
+
+
+/***/ },
+/* 9 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var helpers = __webpack_require__(4);
+	var utils = __webpack_require__(6);
+
+	helpers.register('order', function(order, values, query){
+	  if (typeof order !== 'object') {
+	    throw new Error('Invalid orderby type `' + typeof limit  + '` - it should bean object');
+	  }
+
+	  var output = "SORT ";
+
+	  for (var key in order) {
+	    output += query.__defaultTable + '.' + utils.newVar(key, values) + ' ' + (order[key] === 1? 'ASC': 'DESC') + ', ';
+	  }
+
+	  if (output === "SORT ") return "";
+
+	  return output.substring(0, output.length - 2);
+	});
+
+
+/***/ },
+/* 10 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var helpers = __webpack_require__(4);
+	var utils = __webpack_require__(6);
+
+	helpers.register('limit', function(limit, values, query){
+	  if ( Array.isArray(limit) && limit.length === 2 && typeof limit[0] === 'number' && typeof limit[1] === 'number' ) {
+	    return " LIMIT " + utils.newVar(limit[0], values) + ", " + utils.newVar(limit[1], values);
+	  }
+	  else if ( typeof limit === 'number' )
+	    return " LIMIT " + utils.newVar(limit, values);
+	  else
+	    throw new Error('Invalid limit type `' + typeof limit  + '` for query helper `limit`. Limit must be number or \'all\'');
+	});
+
+
+/***/ },
+/* 11 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var helpers = __webpack_require__(4),
+		utils = __webpack_require__(6);
+
+	helpers.register('embed', function(embed, values, query) {
+		res = ''
+
+		if (embed && embed.length) {
+			for (var i = 0; i < embed.length; i++) {
+				embed[i].cname = 'c' + i;
+				embed[i].key = utils.newVar(embed[i].key, values);
+				res += 'LET ' + embed[i].cname + ' = DOCUMENT(' + utils.newVar(embed[i].collection, values, '@') + ', ' + query.__defaultTable + '.' + embed[i].key +') ';
+			}	
+		}
+
+		return res;
+	});
+
+
+
+/***/ },
+/* 12 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var helpers = __webpack_require__(4);
+
+	helpers.register('offset', function(offset, values){
+	  return " offset $" + values.push(offset);
+	});
+
+
+/***/ },
+/* 13 */
+/***/ function(module, exports, __webpack_require__) {
+
+	/**
+	 * Query Type: Alias
+	 *
+	 * NOTE: This reuqired some special behavior inside of the
+	 *       main query-builder. If you're aliasing an expression
+	 *       then the alias should become the __defaultTable on
+	 *       the current query.
+	 */
+
+	var helpers = __webpack_require__(4);
+	var actions = __webpack_require__(14);
+	var utils = __webpack_require__(6);
+
+	helpers.register('alias', function(alias, values, query){
+	  query.__defaultTable = query.alias;
+	  return alias;
+	});
+
+
+/***/ },
+/* 14 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var HelperManager = __webpack_require__(5);
+
+	module.exports = new HelperManager();
+
+
+/***/ },
+/* 15 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var queryBuilder  = __webpack_require__(2);
+	var helpers       = __webpack_require__(4);
+	var utils         = __webpack_require__(6);
+
+	helpers.register('columns', function(columns, values, query){
+	  if (typeof columns != 'object') throw new Error('Invalid columns input in query properties');
+
+	  if (['insert', 'create-view'].indexOf(query.type) > -1){
+	    return '(' + columns.map(function(col){
+	      return utils.quoteObject( col );
+	    }).join(', ') + ')';
+	  }
+
+	  var output = "";
+
+	  if (Array.isArray(columns)){
+	    for (var i = 0, l = columns.length; i < l; ++i){
+	      if (typeof columns[i] == 'object' && 'type' in columns[i] && !('expression' in columns[i]))
+	        output += '(' + queryBuilder( columns[i], values ).toString() + ')';
+	      else if (typeof columns[i] == 'object' && 'expression' in columns[i])
+	        output += queryBuilder( columns[i], values ).toString();
+	      else if (typeof columns[i] == 'object')
+	        output += utils.quoteObject(columns[i].name, columns[i].table || query.__defaultTable);
+	      else if (columns[i].indexOf('(') > -1)
+	        output += columns[i];
+	      else
+	        output += utils.quoteObject(columns[i], query.__defaultTable);
+
+	      if ( typeof columns[i] == 'object' && ('as' in columns[i] || 'alias' in columns[i]))
+	        output += ' as "' + (columns[i].as || columns[i].alias) + '"';
+
+	      output += ", ";
+	    }
+	  } else {
+	    for (var key in columns){
+	      if (key.indexOf('(') > -1)
+	        output += key + ', ';
+	      else
+	        output += (
+	          typeof columns[key] == 'object' && ('table' in columns[key])
+	        ) ? '(' + queryBuilder( columns[key], values ).toString() + ') as "' + key + '", '
+	          : typeof columns[key] == 'object' && ('type' in columns[key]) ?
+	            queryBuilder( columns[key], values ).toString() + ' as "' + key + '", ' :
+	            utils.quoteObject(key, query.__defaultTable) + ' as "' + columns[key] + '", ';
+	    }
+	  }
+
+	  if (output.length > 0) output = output.substring(0, output.length - 2);
+
+	  return output;
+	});
+
+
+/***/ },
+/* 16 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var helpers = __webpack_require__(4);
+	var queryBuilder = __webpack_require__(2);
+	var utils = __webpack_require__(6);
+
+	helpers.register('table', function(table, values, query){
+		var re = /^[a-z][a-z0-9_-]{0,63}$/i;
+		if (typeof table != 'string') throw new Error('Invalid table type: ' + typeof table);
+		if (!re.test(table)) throw new Error('Invalid table name: ' + table);
+
+		return (query.type === 'select' ? 'IN ' : '') + table;
+	});
+
+
+/***/ },
+/* 17 */
+/***/ function(module, exports, __webpack_require__) {
+
+	
+	var helpers = __webpack_require__(4);
+	var conditionBuilder = __webpack_require__(18);
+
+	helpers.register('where', function(where, values, query){
+	  var output = conditionBuilder(where, query.__defaultTable, values);
+	  if (output.length > 0) output = 'FILTER ' + output;
+	  return output;
+	});
+
+
+/***/ },
+/* 18 */
+/***/ function(module, exports, __webpack_require__) {
+
+	/* WEBPACK VAR INJECTION */(function(Buffer) {var
+	  utils   = __webpack_require__(6)
+	, helpers = __webpack_require__(23)
+	;
+
+	module.exports = function(where, table, values){
+
+	  var buildConditions = function(where, condition, column, joiner, fields){
+	    console.log(arguments);
+	    joiner = joiner || ' && ';
+	    fields = fields || [];
+
+	    // if (column) {
+	    //   column = utils.quoteObject(column, table);
+	    // }
+
+	    var conditions = [], result;
+
+	    for (var key in where) {
+	      console.log(key, '---', where[key])
+
+	      // If the value is null, send a $null helper through the condition builder
+	      if ( where[key] === null ) {
+	        var tmp = {};
+	        tmp[key] = { $null: true };
+	        conditions.push( buildConditions(tmp, condition, column, joiner) );
+	        continue;
+	      }
+
+	      if (typeof where[key] == 'object' && !(where[key] instanceof Date) && !Buffer.isBuffer(where[key])) {
+
+	        // Key is conditional block
+	        if (helpers.has(key)) {
+	          // If it cascades, run it through the builder using the helper key
+	          // as the current condition
+	          // If it doesn't cascade, run the helper immediately
+	          if (helpers.get(key).options.cascade)
+	            (result = buildConditions(where[key], key, column, joiner, fields)) && conditions.push(result);
+	          else
+	            (result = helpers.get(key).fn(column, where[key], values, table, where[key])) && conditions.push(result);
+	        }
+
+	        // Key is Joiner
+	        else if (key == '$or')
+	          (result = buildConditions(where[key], condition, column, ' || ', fields)) && conditions.push(result);
+	        else if (key == '$and')
+	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
+
+	        // Key is array index
+	        else if (+key >= 0)
+	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
+
+	        // Key is column
+	        else {
+	          (result = buildConditions(where[key], condition, key, joiner, fields.concat(key))) && conditions.push(result);
+	        }
+
+	        continue;
+	      }
+
+	      // Key is a helper, use that for this value
+	      if (helpers.has(key)) {
+	        console.log()
+	        console.log('* Key is a helper', key)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
+	        conditions.push(
+	          helpers.get(key).fn(
+	            column
+	          , utils.parameterize(where[key], values)
+	          , values
+	          , table
+	          , where[key]
+	          )
+	        );
+
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
+
+	      // Key is an array index
+	      else if (+key >= 0) {
+	        console.log()
+	        console.log('* Key is an array index', key)
+	        console.log('fields', fields)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
+	        conditions.push(
+	          helpers.get(condition).fn(
+	            column
+	          , utils.parameterize(where[key], values)
+	          , values
+	          , table
+	          , where[key]
+	          )
+	        );
+
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
+
+	      // Key is a column
+	      else {
+	        console.log()
+	        console.log('* Key is a column', key)
+	        console.log('fields', fields)
+	        console.log('column', column)
+	        console.log('where[key]', where[key])
+	        console.log('values', values)
+	        console.log('table', table)
+
+	        conditions.push(
+	          helpers.get(condition).fn(
+	            table + (fields.length? '.' + utils.newVar(fields, values): '') + '.' + utils.parameterize(key, values)
+	          , utils.parameterize(where[key], values)
+	          , values
+	          , table
+	          , where[key]
+	          )
+	        );
+
+	        console.log('conditions');
+	        console.log(conditions);
+	        console.log()
+	      }
+	    }
+
+	    if (conditions.length > 1) return '(' + conditions.join(joiner) + ')';
+	    if (conditions.length == 1) return conditions[0];
+	  };
+
+	  // Always remove outer-most parenthesis
+	  var result = buildConditions(where, '$equals');
+	  if (!result) return '';
+	  if (result[0] == '(') return result.substring(1, result.length - 1);
+	  return result;
+	};
+
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(19).Buffer))
+
+/***/ },
+/* 19 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(Buffer, global) {/*!
@@ -130,9 +900,9 @@
 	 */
 	/* eslint-disable no-proto */
 
-	var base64 = __webpack_require__(4)
-	var ieee754 = __webpack_require__(5)
-	var isArray = __webpack_require__(6)
+	var base64 = __webpack_require__(20)
+	var ieee754 = __webpack_require__(21)
+	var isArray = __webpack_require__(22)
 
 	exports.Buffer = Buffer
 	exports.SlowBuffer = SlowBuffer
@@ -1667,10 +2437,10 @@
 	  return i
 	}
 
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(3).Buffer, (function() { return this; }())))
+	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(19).Buffer, (function() { return this; }())))
 
 /***/ },
-/* 4 */
+/* 20 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -1800,7 +2570,7 @@
 
 
 /***/ },
-/* 5 */
+/* 21 */
 /***/ function(module, exports) {
 
 	exports.read = function (buffer, offset, isLE, mLen, nBytes) {
@@ -1890,7 +2660,7 @@
 
 
 /***/ },
-/* 6 */
+/* 22 */
 /***/ function(module, exports) {
 
 	
@@ -1929,807 +2699,21 @@
 
 
 /***/ },
-/* 7 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var queryTypes = __webpack_require__(8);
-	var queryHelpers = __webpack_require__(9);
-	var utils = __webpack_require__(11);
-
-	module.exports = function(collection, json) {
-	  if (typeof collection !== 'string' || !collection || !collection.length) {
-	    throw new Error('collection empty or not a string.')
-	  }  
-
-	  if (typeof json === undefined || !json) {
-	    throw new Error('json empty.')
-	  }  
-
-	  var query = {
-	    type: 'select',
-	    table: collection,
-	    alias: 'c',
-	    return: true
-	  };
-
-	  if (typeof json === 'string') {
-	    try {
-	      json = JSON.parse(json);
-	    }
-	    catch (err) {
-	      throw new Error(err);
-	      return err;
-	    }
-	  }
-
-	  if (!json) {
-	    return '';
-	  }
-
-	  for (var key in json) {
-	    if (key === '$orderby') {
-	      query['order'] = json[key];
-	      delete json[key];
-	    }
-	    else if (key === '$limit') {
-	      if (json['$skip']) {
-	        query['limit'] = [ json['$skip'], json[key] ];
-	        delete json['$skip'];
-	      }
-	      else {
-	        query['limit'] = json[key];
-	      }
-
-	      delete json[key];
-	    }
-	    else if (key.substring(0, 1) === '@') {
-	      query.embed = query.embed || [];
-	      query.embed.push({ key: key.substring(1), collection: json[key] });
-	      delete json[key];
-	    }
-	  }
-
-	  // the rest belongs to "where"
-	  query.where = json;
-
-	  return build(query);
-	}
-
-	/**
-	 * Main AQL Building function
-	 * @param  {Object} query
-	 * @param  {Array}  values
-	 * @return {String}
-	 */
-	function build(query, values) {
-	  if (!query.type){
-	    query.type = 'expression';
-	  } else if (!queryTypes.has(query.type)){
-	    query.function = query.type;
-	    query.type = 'function';
-	  }
-
-	  var
-	    type      = queryTypes.get(query.type)
-	  , variables = type.match(/\{\w+\}/g);
-
-	  values    = values || {};
-	  query.__defaultTable = query.table;
-	  query.columns = ['*'];
-
-	  for (var i = 0, l = variables.length, key; i < l; ++i){
-	    // If there exists a builder function and input in the options
-	    // corresponding to the query helper name, then run that
-	    // helper function with the value of the query->helper_key
-	    type = type.replace(
-	      variables[i]
-	    , queryHelpers.has(key = variables[i].substring(1, variables[i].length - 1)) && query[key] ?
-	      queryHelpers.get(key).fn(query[key], values, query) : ''
-	    );
-	  }
-
-	  var result = {
-	    query :   type.trim().replace(/\s+/g, " ")
-	  , values:   values
-	  };
-
-	  return result;
-	};
-
-
-/***/ },
-/* 8 */
-/***/ function(module, exports) {
-
-	
-	var types = {};
-
-	module.exports.add = function(type, query){
-	  types[type] = query;
-	};
-
-	module.exports.get = function(type){
-	  return types[type];
-	};
-
-	module.exports.has = function(type){
-	  return types.hasOwnProperty(type);
-	};
-
-	Object.defineProperty(module.exports, 'list', {
-	  get: function() {
-	    return Object.keys(types);
-	  }
-	});
-
-
-/***/ },
-/* 9 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var HelperManager = __webpack_require__(10);
-
-	module.exports = new HelperManager();
-
-
-/***/ },
-/* 10 */
-/***/ function(module, exports) {
-
-	
-	var HelperManager = function(defaults){
-	  this.defaults = defaults || {};
-	  this.helpers = {};
-	  return this;
-	};
-
-	HelperManager.prototype.get = function(name){
-	  if (!this.has(name)) throw new Error('Cannot find helper: ' + name);
-	  return this.helpers[name];
-	};
-
-	HelperManager.prototype.has = function(name){
-	  return this.helpers.hasOwnProperty(name);
-	};
-
-	HelperManager.prototype.add = function(name, options, fn){
-	  if (typeof options == 'function'){
-	    fn = options;
-	    options = {};
-	  }
-
-	  options = options || {};
-
-	  for (var key in this.defaults){
-	    if (!(key in options)) options[key] = this.defaults[key];
-	  }
-
-	  this.helpers[name] = { fn: fn, options: options };
-
-	  return this;
-	};
-
-	HelperManager.prototype.register = function(name, options, fn){
-	  return this.add(name, options, fn);
-	};
-
-	module.exports = HelperManager;
-
-
-/***/ },
-/* 11 */
-/***/ function(module, exports) {
-
-	
-	var utils = module.exports = {};
-	var regs = {
-	  dereferenceOperators: /[-#=]+>+/g
-	, endsInCast: /::\w+$/
-	};
-
-	utils.newVar = function(value, values, prefix) {
-	  prefix = prefix || '';
-
-	  if (Array.isArray(value)) {
-	    res = [];
-	    for (var i = 0; i < value.length; i++) {
-	      res.push(utils.newVar(value[i], values, prefix));
-	    }
-
-	    return res.join('.');
-	  }
-	  else {
-	    var varname = prefix + 'v' + Object.keys(values).length;
-	    values[varname] = value;
-
-	    return '@' + varname;
-	  }
-	}
-
-	utils.parameterize = function(value, values){
-	  if (typeof value == 'boolean') return value ? 'true' : 'false';
-	  if (value[0] != '@') return utils.newVar(value, values);
-	  if (value[value.length - 1] != '@') return values.push(value);
-	  return utils.quoteObject(value.substring(1, value.length - 1));
-	};
-
-	utils.quoteColumn = utils.quoteObject = function(field, collection){
-	  var period;
-	  var rest = Array.prototype.slice.call( arguments, 1 );
-	  var split;
-
-	  // Wierdly on phantomjs Number.isNaN is undefined
-	  // FIXME: find the root cause
-	  var checkIsNaN = Number.isNaN || isNaN;
-
-	  // Split up database and/or schema definition
-	  for(var i=0;i<rest.length;++i) {
-	    if(rest[i].indexOf('.')) {
-	      split = rest[i].split('.');
-	      rest.splice(i,1);
-	      split.forEach(function(s) {
-	        rest.splice(i,0,s);
-	      });
-	    }
-	  }
-
-	  // They're casting
-	  if ( regs.endsInCast.test( field ) ){
-	    return utils.quoteObject.apply(
-	      null
-	    , [ field.replace( regs.endsInCast, '' ) ].concat( rest )
-	    ) + field.match( regs.endsInCast )[0];
-	  }
-
-	  // They're using JSON/Hstore operators
-	  if ( regs.dereferenceOperators.test( field ) ){
-	    var operators = field.match( regs.dereferenceOperators );
-
-	    // Split on operators
-	    return field.split(
-	      regs.dereferenceOperators
-	    // Properly quote each part
-	    ).map( function( part, i ){
-	      if ( i === 0 ) return utils.quoteObject.apply( null, [ part ].concat( rest ) );
-
-	      if ( checkIsNaN( parseInt( part ) ) && part.indexOf("'") === -1 ){
-	        return "'" + part + "'";
-	      }
-
-	      return part;
-	    // Re-join fields and operators
-	    }).reduce( function( a, b, i ){
-	      return [ a, b ].join( operators[ i - 1 ] );
-	    });
-	  }
-
-	  // Just using *, no collection
-	  if (field.indexOf('*') === 0 && collection)
-	    return '"' + (rest.reverse()).join('"."') + '".*';
-
-	  // Using *, specified collection, used quotes
-	  else if (field.indexOf('".*') > -1)
-	    return field;
-
-	  // Using *, specified collection, didn't use quotes
-	  else if (field.indexOf('.*') > -1)
-	    return '"' + field.split('.')[0] + '".*';
-
-	  // No periods specified in field, use explicit `table[, schema[, database] ]`
-	  else if (field.indexOf('.') === -1)
-	    return ( rest.reverse() ).concat( field.replace( /\"/g, '' ) ).join('.');
-
-	  // Otherwise, a `.` was in there, just quote whatever was specified
-	  else
-	    return field.replace( /\"/g, '' ).split('.').join('.');
-	};
-
-	utils.quoteValue = function(value){
-	  var num = parseInt(value), isNum = (typeof num == 'number' && (num < 0 || num > 0));
-	  return isNum ? value : "$$" + value + "$$";
-	};
-
-	/**
-	 * Returns a function that when called, will call the
-	 * passed in function with a specific set of arguments
-	 */
-	utils.with = function(fn){
-	  var args = Array.prototype.slice.call(arguments, 1);
-	  return function(){ fn.apply({}, args); };
-	};
-
-
-/***/ },
-/* 12 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var queryTypes = __webpack_require__(8);
-
-	queryTypes.add( 'select', [
-	  'FOR'
-	, '{alias} {table}'
-	, '{where} {limit} {order} {embed} {return}'
-	].join(' '));
-
-	/*
-	queryTypes.add(
-	  'insert'
-	, '{with} insert into {table} {columns} {values} {expression} {returning}'
-	);
-
-	queryTypes.add(
-	  'update'
-	, '{with} update {table} {values} {updates} {from} {where} {returning}'
-	);
-
-	queryTypes.add(
-	  'delete'
-	, '{with} delete from {table} {where} {returning}'
-	);
-
-	queryTypes.add(
-	  'remove'
-	, '{with} delete from {table} {alias} {where} {returning}'
-	);
-
-	queryTypes.add(
-	  'create-table'
-	, '{with} create table {ifNotExists} {table} ({definition})'
-	);
-
-	queryTypes.add(
-	  'drop-table'
-	, '{with} drop table {ifExists} {table} {cascade}'
-	);
-
-	queryTypes.add(
-	  'alter-table'
-	, 'alter table {ifExists} {only} {table} {action}'
-	);
-
-	queryTypes.add(
-	  'create-view'
-	, 'create {orReplace} {temporary} view {view} {columns} as {expression}'
-	);
-
-	queryTypes.add(
-	  'union'
-	, '{with} {queries}'
-	);
-
-	queryTypes.add(
-	  'intersect'
-	, '{with} {queries}'
-	);
-
-	queryTypes.add(
-	  'except'
-	, '{with} {queries}'
-	);
-	*/
-	queryTypes.add('function', '{function}( {expression} )');
-	queryTypes.add('expression', '{expression}');
-
-
-/***/ },
-/* 13 */
-/***/ function(module, exports, __webpack_require__) {
-
-	var helpers = __webpack_require__(9);
-	var queryBuilder = __webpack_require__(7);
-
-	helpers.register('values', function(values, valuesArray, query){
-	  if (typeof values != 'object') throw new Error('Invalid values input in query properties');
-
-	  if (query.type === 'update')
-	    return helpers.get('updates').fn(values, valuesArray, query);
-
-	  if ( !Array.isArray( values ) ) values = [ values ];
-
-	  if ( values.length === 0 ) throw new Error('MoSQL.queryHelper.values - Invalid values array length `0`');
-
-	  // Build object keys union
-	  var keys = [], checkKeys = function( k ){
-	    if ( keys.indexOf( k ) > -1 ) return;
-	    keys.push( k );
-	  };
-
-	  for ( var i = 0, l = values.length; i < l; ++i ) {
-	    Object.keys( values[i] ).forEach( checkKeys );
-	  }
-
-	  var allValues = values.map( function( value ) {
-	    var result = [];
-	    for ( var i = 0, l = keys.length; i < l; ++i ){
-	      if (value[ keys[i] ] === null || value[ keys[i] ] === undefined) {
-	        result.push('null');
-	      } else if (typeof value[ keys[i] ] == 'object' && 'type' in value[ keys[i] ]) {
-	        result.push('(' + queryBuilder( value[ keys[i] ], valuesArray ) + ')');
-	      } else {
-	        result.push('@' + valuesArray.push(value[keys[i]]));
-	      }
-	    }
-	    return '(' + result.join(', ') + ')';
-	  }).join(', ');
-
-	  return '("' + keys.join('", "') + '") values ' + allValues;
-	});
-
-
-/***/ },
-/* 14 */
-/***/ function(module, exports, __webpack_require__) {
-
-	var helpers = __webpack_require__(9);
-	var utils = __webpack_require__(11);
-
-	helpers.register('order', function(order, values, query){
-	  if (typeof order !== 'object') {
-	    throw new Error('Invalid orderby type `' + typeof limit  + '` - it should bean object');
-	  }
-
-	  var output = "SORT ";
-
-	  for (var key in order) {
-	    output += query.__defaultTable + '.' + utils.newVar(key, values) + ' ' + (order[key] === 1? 'ASC': 'DESC') + ', ';
-	  }
-
-	  if (output === "SORT ") return "";
-
-	  return output.substring(0, output.length - 2);
-	});
-
-
-/***/ },
-/* 15 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9);
-	var utils = __webpack_require__(11);
-
-	helpers.register('limit', function(limit, values, query){
-	  if ( Array.isArray(limit) && limit.length === 2 && typeof limit[0] === 'number' && typeof limit[1] === 'number' ) {
-	    return " LIMIT " + utils.newVar(limit[0], values) + ", " + utils.newVar(limit[1], values);
-	  }
-	  else if ( typeof limit === 'number' )
-	    return " LIMIT " + utils.newVar(limit, values);
-	  else
-	    throw new Error('Invalid limit type `' + typeof limit  + '` for query helper `limit`. Limit must be number or \'all\'');
-	});
-
-
-/***/ },
-/* 16 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9),
-		utils = __webpack_require__(11);
-
-	helpers.register('embed', function(embed, values, query) {
-		res = ''
-
-		if (embed && embed.length) {
-			for (var i = 0; i < embed.length; i++) {
-				embed[i].cname = 'c' + i;
-				embed[i].key = utils.newVar(embed[i].key, values);
-				res += 'LET ' + embed[i].cname + ' = DOCUMENT(' + utils.newVar(embed[i].collection, values, '@') + ', ' + query.__defaultTable + '.' + embed[i].key +') ';
-			}	
-		}
-
-		return res;
-	});
-
-
-
-/***/ },
-/* 17 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9);
-
-	helpers.register('offset', function(offset, values){
-	  return " offset $" + values.push(offset);
-	});
-
-
-/***/ },
-/* 18 */
-/***/ function(module, exports, __webpack_require__) {
-
-	/**
-	 * Query Type: Alias
-	 *
-	 * NOTE: This reuqired some special behavior inside of the
-	 *       main query-builder. If you're aliasing an expression
-	 *       then the alias should become the __defaultTable on
-	 *       the current query.
-	 */
-
-	var helpers = __webpack_require__(9);
-	var actions = __webpack_require__(19);
-	var utils = __webpack_require__(11);
-
-	helpers.register('alias', function(alias, values, query){
-	  query.__defaultTable = query.alias;
-	  return alias;
-	});
-
-
-/***/ },
-/* 19 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var HelperManager = __webpack_require__(10);
-
-	module.exports = new HelperManager();
-
-
-/***/ },
-/* 20 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var queryBuilder  = __webpack_require__(7);
-	var helpers       = __webpack_require__(9);
-	var utils         = __webpack_require__(11);
-
-	helpers.register('columns', function(columns, values, query){
-	  if (typeof columns != 'object') throw new Error('Invalid columns input in query properties');
-
-	  if (['insert', 'create-view'].indexOf(query.type) > -1){
-	    return '(' + columns.map(function(col){
-	      return utils.quoteObject( col );
-	    }).join(', ') + ')';
-	  }
-
-	  var output = "";
-
-	  if (Array.isArray(columns)){
-	    for (var i = 0, l = columns.length; i < l; ++i){
-	      if (typeof columns[i] == 'object' && 'type' in columns[i] && !('expression' in columns[i]))
-	        output += '(' + queryBuilder( columns[i], values ).toString() + ')';
-	      else if (typeof columns[i] == 'object' && 'expression' in columns[i])
-	        output += queryBuilder( columns[i], values ).toString();
-	      else if (typeof columns[i] == 'object')
-	        output += utils.quoteObject(columns[i].name, columns[i].table || query.__defaultTable);
-	      else if (columns[i].indexOf('(') > -1)
-	        output += columns[i];
-	      else
-	        output += utils.quoteObject(columns[i], query.__defaultTable);
-
-	      if ( typeof columns[i] == 'object' && ('as' in columns[i] || 'alias' in columns[i]))
-	        output += ' as "' + (columns[i].as || columns[i].alias) + '"';
-
-	      output += ", ";
-	    }
-	  } else {
-	    for (var key in columns){
-	      if (key.indexOf('(') > -1)
-	        output += key + ', ';
-	      else
-	        output += (
-	          typeof columns[key] == 'object' && ('table' in columns[key])
-	        ) ? '(' + queryBuilder( columns[key], values ).toString() + ') as "' + key + '", '
-	          : typeof columns[key] == 'object' && ('type' in columns[key]) ?
-	            queryBuilder( columns[key], values ).toString() + ' as "' + key + '", ' :
-	            utils.quoteObject(key, query.__defaultTable) + ' as "' + columns[key] + '", ';
-	    }
-	  }
-
-	  if (output.length > 0) output = output.substring(0, output.length - 2);
-
-	  return output;
-	});
-
-
-/***/ },
-/* 21 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9);
-	var queryBuilder = __webpack_require__(7);
-	var utils = __webpack_require__(11);
-
-	helpers.register('table', function(table, values, query){
-		var re = /^[a-z0-9_-]+$/i;
-		if (typeof table != 'string') throw new Error('Invalid table type: ' + typeof table);
-		if (!re.test(table)) throw new Error('Invalid table name: ' + table);
-
-		return (query.type === 'select' ? 'IN ' : '') + table;
-	});
-
-
-/***/ },
-/* 22 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9);
-	var conditionBuilder = __webpack_require__(23);
-
-	helpers.register('where', function(where, values, query){
-	  var output = conditionBuilder(where, query.__defaultTable, values);
-	  if (output.length > 0) output = 'FILTER ' + output;
-	  return output;
-	});
-
-
-/***/ },
 /* 23 */
 /***/ function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(Buffer) {var
-	  utils   = __webpack_require__(11)
-	, helpers = __webpack_require__(24)
-	;
+	
+	var HelperManager = __webpack_require__(5);
 
-	module.exports = function(where, table, values){
+	module.exports = new HelperManager({ cascade: true });
 
-	  var buildConditions = function(where, condition, column, joiner, fields){
-	    console.log(arguments);
-	    joiner = joiner || ' && ';
-	    fields = fields || [];
-
-	    // if (column) {
-	    //   column = utils.quoteObject(column, table);
-	    // }
-
-	    var conditions = [], result;
-
-	    for (var key in where) {
-	      console.log(key, '---', where[key])
-
-	      // If the value is null, send a $null helper through the condition builder
-	      if ( where[key] === null ) {
-	        var tmp = {};
-	        tmp[key] = { $null: true };
-	        conditions.push( buildConditions(tmp, condition, column, joiner) );
-	        continue;
-	      }
-
-	      if (typeof where[key] == 'object' && !(where[key] instanceof Date) && !Buffer.isBuffer(where[key])) {
-
-	        // Key is conditional block
-	        if (helpers.has(key)) {
-	          // If it cascades, run it through the builder using the helper key
-	          // as the current condition
-	          // If it doesn't cascade, run the helper immediately
-	          if (helpers.get(key).options.cascade)
-	            (result = buildConditions(where[key], key, column, joiner, fields)) && conditions.push(result);
-	          else
-	            (result = helpers.get(key).fn(column, where[key], values, table, where[key])) && conditions.push(result);
-	        }
-
-	        // Key is Joiner
-	        else if (key == '$or')
-	          (result = buildConditions(where[key], condition, column, ' || ', fields)) && conditions.push(result);
-	        else if (key == '$and')
-	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
-
-	        // Key is array index
-	        else if (+key >= 0)
-	          (result = buildConditions(where[key], condition, column, joiner, fields)) && conditions.push(result);
-
-	        // Key is column
-	        else {
-	          (result = buildConditions(where[key], condition, key, joiner, fields.concat(key))) && conditions.push(result);
-	        }
-
-	        continue;
-	      }
-
-	      // Key is a helper, use that for this value
-	      if (helpers.has(key)) {
-	        console.log()
-	        console.log('* Key is a helper', key)
-	        console.log('column', column)
-	        console.log('where[key]', where[key])
-	        console.log('values', values)
-	        console.log('table', table)
-
-	        conditions.push(
-	          helpers.get(key).fn(
-	            column
-	          , utils.parameterize(where[key], values)
-	          , values
-	          , table
-	          , where[key]
-	          )
-	        );
-
-	        console.log('conditions');
-	        console.log(conditions);
-	        console.log()
-	      }
-
-	      // Key is an array index
-	      else if (+key >= 0) {
-	        console.log()
-	        console.log('* Key is an array index', key)
-	        console.log('fields', fields)
-	        console.log('column', column)
-	        console.log('where[key]', where[key])
-	        console.log('values', values)
-	        console.log('table', table)
-
-	        conditions.push(
-	          helpers.get(condition).fn(
-	            column
-	          , utils.parameterize(where[key], values)
-	          , values
-	          , table
-	          , where[key]
-	          )
-	        );
-
-	        console.log('conditions');
-	        console.log(conditions);
-	        console.log()
-	      }
-
-	      // Key is a column
-	      else {
-	        console.log()
-	        console.log('* Key is a column', key)
-	        console.log('fields', fields)
-	        console.log('column', column)
-	        console.log('where[key]', where[key])
-	        console.log('values', values)
-	        console.log('table', table)
-
-	        conditions.push(
-	          helpers.get(condition).fn(
-	            table + (fields.length? '.' + utils.newVar(fields, values): '') + '.' + utils.parameterize(key, values)
-	          , utils.parameterize(where[key], values)
-	          , values
-	          , table
-	          , where[key]
-	          )
-	        );
-
-	        console.log('conditions');
-	        console.log(conditions);
-	        console.log()
-	      }
-	    }
-
-	    if (conditions.length > 1) return '(' + conditions.join(joiner) + ')';
-	    if (conditions.length == 1) return conditions[0];
-	  };
-
-	  // Always remove outer-most parenthesis
-	  var result = buildConditions(where, '$equals');
-	  if (!result) return '';
-	  if (result[0] == '(') return result.substring(1, result.length - 1);
-	  return result;
-	};
-
-	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(3).Buffer))
 
 /***/ },
 /* 24 */
 /***/ function(module, exports, __webpack_require__) {
 
 	
-	var HelperManager = __webpack_require__(10);
-
-	module.exports = new HelperManager({ cascade: true });
-
-
-/***/ },
-/* 25 */
-/***/ function(module, exports, __webpack_require__) {
-
-	
-	var helpers = __webpack_require__(9);
+	var helpers = __webpack_require__(4);
 
 	helpers.register('return', function(embed, values, query) {
 		var embed = query.embed;
@@ -2752,7 +2736,7 @@
 
 
 /***/ },
-/* 26 */
+/* 25 */
 /***/ function(module, exports, __webpack_require__) {
 
 	
@@ -2761,9 +2745,9 @@
 	 * TODO: update comments :/
 	 */
 
-	var conditionals = __webpack_require__(24);
-	var queryBuilder = __webpack_require__(7);
-	var utils = __webpack_require__(11);
+	var conditionals = __webpack_require__(23);
+	var queryBuilder = __webpack_require__(2);
+	var utils = __webpack_require__(6);
 
 	/**
 	 * Querying where column is equal to a value
