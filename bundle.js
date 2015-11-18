@@ -1949,7 +1949,7 @@
 	  var query = {
 	    type: 'select',
 	    table: collection,
-	    alias: collection.substring(0, 1),
+	    alias: 'c',
 	    return: true
 	  };
 
